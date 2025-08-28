@@ -1,0 +1,47 @@
+body {
+  font-family: "Ubuntu", sans-serif;
+  background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+  margin: 0;
+  padding: 0;
+}
+
+.header {
+  text-align: center;
+  padding: 2rem 1rem 1rem;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.calendar-container {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+  padding: 1rem;
+  max-width: 1000px;
+  margin: auto;
+  margin-bottom: 3rem;
+}
+
+.tooltip-custom {
+  position: absolute;
+  background: rgba(50, 50, 93, 0.9);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s ease;
+  z-index: 1000;
+}
+
+.tooltip-custom.show {
+  opacity: 1;
+  transform: translateY(0);
+}

@@ -1,0 +1,3 @@
+# php/.htaccess
+AddType text/css .css
+AddType application/javascript .js
