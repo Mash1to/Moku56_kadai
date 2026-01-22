@@ -22,7 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const text = await res.text();
     let data = null;
     try { data = JSON.parse(text); } catch (_) {}
-
     if (!res.ok) {
       const msg = (data && data.error) ? data.error : `HTTP ${res.status}: ${text.slice(0, 120)}`;
       throw new Error(msg);
@@ -39,26 +38,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const rStart = document.getElementById('rStart');
   const rEnd = document.getElementById('rEnd');
   const rTitle = document.getElementById('rTitle');
-  const rLocation = document.getElementById('rLocation');
+  const rRoom = document.getElementById('rRoom');
   const rWho = document.getElementById('rWho');
   const rDesc = document.getElementById('rDesc');
 
-  const hasDialog =
-    dlg && form && btnCancel &&
-    rStart && rEnd && rTitle && rLocation && rWho && rDesc;
   const reserveError = document.getElementById('reserveError');
 
+  const hasDialog =
+    dlg && form && btnCancel &&
+    rStart && rEnd && rTitle && rRoom && rWho && rDesc;
+
   function showReserveError(msg){
-    if (!reserveError) return;
-    reserveError.textContent = msg;
-    reserveError.classList.add('show');
+    if (reserveError) {
+      reserveError.textContent = msg;
+      reserveError.classList.add('show');
+    } else {
+      alert(msg);
+    }
   }
   function clearReserveError(){
     if (!reserveError) return;
     reserveError.textContent = '';
     reserveError.classList.remove('show');
   }
-
 
   let pending = null;
 
@@ -73,50 +75,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // ====== 部屋一覧ロード ======
+  let roomsLoaded = false;
+  async function loadRoomsIntoSelect() {
+    if (!rRoom) return;
+    if (roomsLoaded && rRoom.options.length > 1) return;
+
+    rRoom.innerHTML = `<option value="">部屋を選択してください</option>`;
+    try {
+      const rooms = await fetchJson('rooms_list.php');
+      rooms.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = String(r.id);
+        opt.textContent = r.name;
+        rRoom.appendChild(opt);
+      });
+      roomsLoaded = true;
+    } catch (e) {
+      rRoom.innerHTML = `<option value="">部屋の取得に失敗しました</option>`;
+    }
+  }
+
   function openReserve(start, end) {
     pending = { start, end };
+    if (!hasDialog) return;
 
-    const startLabel = start.toLocaleString('ja-JP');
-    const endLabel = end.toLocaleString('ja-JP');
+    rStart.value = start.toLocaleString('ja-JP');
+    rEnd.value = end.toLocaleString('ja-JP');
 
-    if (hasDialog) {
-      rStart.value = startLabel;
-      rEnd.value = endLabel;
-      rTitle.value = '';
-      rLocation.value = '';
-      rWho.value = '';
-      rDesc.value = '';
-      clearReserveError(); 
+    rTitle.value = '';
+    rWho.value = '';
+    rDesc.value = '';
+    clearReserveError();
+
+    loadRoomsIntoSelect().finally(() => {
+      // 先頭（未選択）にする
+      rRoom.value = '';
       dlg.showModal();
       rTitle.focus();
-      return;
-    }
-
-    // dialogがない場合のフォールバック
-    const title = prompt(`予約タイトル\n（${startLabel}〜${endLabel}）`);
-    if (!title) { pending = null; return; }
-
-    (async () => {
-      try {
-        const data = await fetchJson('create_event.php', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title,
-            start: toMysqlDatetime(start),
-            end: toMysqlDatetime(end),
-            location: '',
-            who_name: '',
-            description: ''
-          })
-        });
-        if (data.success) calendar.refetchEvents();
-      } catch (err) {
-        alert(err.message || '予約登録に失敗しました');
-      } finally {
-        pending = null;
-      }
-    })();
+    });
   }
 
   // ====== FullCalendar ======
@@ -145,6 +142,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     events: 'load_events.php',
 
+    // ★ イベント内に「部屋バッジ」を表示
+    eventContent: function(arg) {
+      const p = arg.event.extendedProps || {};
+      const loc = p.location ? String(p.location) : '';
+      const timeText = arg.timeText ? String(arg.timeText) : '';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'evt-wrap';
+
+      const top = document.createElement('div');
+      top.className = 'evt-top';
+      top.textContent = `${timeText} ${arg.event.title}`.trim();
+      wrap.appendChild(top);
+
+      if (loc) {
+        const badge = document.createElement('div');
+        badge.className = 'evt-badge';
+        badge.textContent = loc;
+        wrap.appendChild(badge);
+      }
+
+      return { domNodes: [wrap] };
+    },
+
     // ドラッグ選択→予約
     select: function(sel) {
       openReserve(sel.start, sel.end);
@@ -162,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
       openReserve(start, end);
     },
 
-    // クリックでキャンセル
+    // クリックでキャンセル（削除）
     eventClick: function(info) {
       info.jsEvent.preventDefault();
       info.jsEvent.stopPropagation();
@@ -193,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
       tooltipOn = true;
 
       const p = info.event.extendedProps || {};
-      const loc = p.location ? `場所: ${p.location}<br>` : '';
+      const loc = p.location ? `部屋: ${p.location}<br>` : '';
       const who = p.who_name ? `誰が: ${p.who_name}<br>` : '';
       const desc = p.description ? `メモ: ${String(p.description).replace(/\n/g, '<br>')}` : '';
 
@@ -281,6 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCancel.addEventListener('click', () => {
       try { dlg.close(); } catch (_) {}
       pending = null;
+      clearReserveError();
     });
 
     form.addEventListener('submit', async (e) => {
@@ -290,10 +312,10 @@ document.addEventListener('DOMContentLoaded', () => {
       clearReserveError();
 
       const title = rTitle.value.trim();
-      const location = rLocation.value.trim();
+      const roomId = Number(rRoom.value || 0);
 
       if (!title) { showReserveError('予約内容（タイトル）は必須です'); return; }
-      if (!location) { showReserveError('場所は必須です'); return; }
+      if (!roomId) { showReserveError('部屋は必須です'); return; }
 
       try {
         const res = await fetch('create_event.php', {
@@ -303,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
             title,
             start: toMysqlDatetime(pending.start),
             end: toMysqlDatetime(pending.end),
-            location,
+            room_id: roomId,
             who_name: rWho.value.trim(),
             description: rDesc.value.trim()
           })

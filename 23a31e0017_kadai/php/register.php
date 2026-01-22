@@ -4,11 +4,12 @@ session_start();
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $join_code = trim($_POST['join_code'] ?? '');
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
     $password_confirm = $_POST['password_confirm'] ?? '';
 
-    if ($username === '' || $password === '' || $password_confirm === '') {
+    if ($join_code === '' || $username === '' || $password === '' || $password_confirm === '') {
         $errors[] = 'すべての項目を入力してください。';
     }
 
@@ -20,6 +21,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'ユーザー名が長すぎます。（50文字以内）';
     }
 
+    if (mb_strlen($join_code) > 32) {
+        $errors[] = '組織コードが不正です。';
+    }
+
     if (empty($errors)) {
         try {
             $pdo = new PDO(
@@ -29,28 +34,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
             );
 
-            // 同じユーザー名がすでに存在しないかチェック
-            $stmt = $pdo->prepare('SELECT id FROM users WHERE username = :username');
-            $stmt->execute([':username' => $username]);
-            if ($stmt->fetch()) {
-                $errors[] = 'このユーザー名は既に使われています。';
+            // 1) 組織コードから org_id を取得
+            $stmt = $pdo->prepare('SELECT id FROM organizations WHERE join_code = :code');
+            $stmt->execute([':code' => $join_code]);
+            $org = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$org) {
+                $errors[] = '組織コードが見つかりません。管理者に確認してください。';
             } else {
-                // 登録
-                $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare(
-                    'INSERT INTO users (username, password) VALUES (:username, :password)'
-                );
-                $stmt->execute([
-                    ':username' => $username,
-                    ':password' => $hash,
-                ]);
+                $org_id = (int)$org['id'];
 
-                $newUserId = $pdo->lastInsertId();
-                $_SESSION['user_id'] = $newUserId;
-                $_SESSION['username'] = $username;
+                // 2) 同じユーザー名が存在しないかチェック
+                $stmt = $pdo->prepare('SELECT id FROM users WHERE username = :username');
+                $stmt->execute([':username' => $username]);
+                if ($stmt->fetch()) {
+                    $errors[] = 'このユーザー名は既に使われています。';
+                } else {
+                    // 3) 登録（roleは通常 user）
+                    $hash = password_hash($password, PASSWORD_DEFAULT);
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO users (org_id, username, password, role) VALUES (:org_id, :username, :password, :role)'
+                    );
+                    $stmt->execute([
+                        ':org_id' => $org_id,
+                        ':username' => $username,
+                        ':password' => $hash,
+                        ':role' => 'user',
+                    ]);
 
-                header('Location: calendar.php');
-                exit;
+                    $_SESSION['user_id'] = (int)$pdo->lastInsertId();
+                    $_SESSION['username'] = $username;
+                    $_SESSION['org_id'] = $org_id;
+                    $_SESSION['role'] = 'user';
+
+                    header('Location: calendar.php');
+                    exit;
+                }
             }
         } catch (PDOException $e) {
             $errors[] = 'データベースエラーが発生しました。';
@@ -58,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -82,9 +102,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <form method="POST" class="auth-form">
       <div>
+        <label>組織コード</label>
+        <input type="text" name="join_code" maxlength="32" required placeholder="例）ORG-1234">
+      </div>
+      <div>
         <label>ユーザー名</label>
         <input type="text" name="username" required
-               value="<?= htmlspecialchars($_POST['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
+              value="<?= htmlspecialchars($_POST['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
       </div>
       <div>
         <label>パスワード</label>

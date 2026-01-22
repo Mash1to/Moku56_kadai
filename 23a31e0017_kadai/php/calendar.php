@@ -11,9 +11,8 @@ if (!isset($_SESSION['user_id'])) {
   <meta charset="UTF-8">
   <title>予約アプリ - カレンダー</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="assets/style.css?v=<?= @filemtime(__DIR__ . '/assets/style.css') ?: time() ?>">
 </head>
-
 <body>
   <div class="header">
     <div class="title">📅 予約アプリ</div>
@@ -36,8 +35,8 @@ if (!isset($_SESSION['user_id'])) {
   <dialog id="reserveDialog" class="reserve-dialog">
     <form method="dialog" id="reserveForm" class="reserve-form">
       <h2 class="reserve-title">予約を作成</h2>
-      <div id="reserveError" class="reserve-error" aria-live="polite"></div>
 
+      <div id="reserveError" class="reserve-error" aria-live="polite"></div>
 
       <div class="reserve-row">
         <label>開始</label>
@@ -55,8 +54,10 @@ if (!isset($_SESSION['user_id'])) {
       </div>
 
       <div class="reserve-row">
-        <label>場所（必須）</label>
-        <input type="text" id="rLocation" maxlength="100" placeholder="例）会議室A / オンライン" required>
+        <label>部屋 *</label>
+        <select id="rRoom" required>
+          <option value="">読み込み中...</option>
+        </select>
       </div>
 
       <div class="reserve-row">
@@ -77,6 +78,6 @@ if (!isset($_SESSION['user_id'])) {
   </dialog>
 
   <script src="assets/fullcalendar/index.global.min.js"></script>
-  <script src="assets/script.js"></script>
+  <script src="assets/script.js?v=<?= @filemtime(__DIR__ . '/assets/script.js') ?: time() ?>"></script>
 </body>
 </html>

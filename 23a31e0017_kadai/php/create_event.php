@@ -2,9 +2,25 @@
 session_start();
 header('Content-Type: application/json');
 
-if (!isset($_SESSION['user_id'])) {
+if (!isset($_SESSION['user_id'], $_SESSION['org_id'])) {
   http_response_code(401);
   echo json_encode(['success' => false, 'error' => 'ログインが必要です']);
+  exit;
+}
+
+$data = json_decode(file_get_contents('php://input'), true);
+
+$title = trim($data['title'] ?? '');
+$start = trim($data['start'] ?? '');
+$end   = trim($data['end'] ?? '');
+$room_id = (int)($data['room_id'] ?? 0);
+
+$who_name = trim($data['who_name'] ?? '');
+$description = trim($data['description'] ?? '');
+
+if ($title === '' || $start === '' || $end === '' || $room_id <= 0) {
+  http_response_code(400);
+  echo json_encode(['success' => false, 'error' => '必須項目（タイトル/開始/終了/部屋）が不足しています']);
   exit;
 }
 
@@ -15,102 +31,68 @@ try {
     'apppass',
     [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
   );
-} catch (PDOException $e) {
-  http_response_code(500);
-  echo json_encode(['success' => false, 'error' => 'DB接続失敗']);
-  exit;
-}
 
-$data = json_decode(file_get_contents('php://input'), true);
+  $org_id = (int)$_SESSION['org_id'];
+  $user_id = (int)$_SESSION['user_id'];
 
-$title = trim($data['title'] ?? '');
-$start = trim($data['start'] ?? '');
-$end   = trim($data['end'] ?? '');
-
-$location = trim($data['location'] ?? '');
-$who_name = trim($data['who_name'] ?? '');
-$description = trim($data['description'] ?? '');
-
-if ($title === '' || $start === '' || $end === '') {
-  http_response_code(400);
-  echo json_encode(['success' => false, 'error' => '必須項目（タイトル/開始/終了）が不足しています']);
-  exit;
-}
-
-// 重複禁止の対象を「場所」単位でやるので必須にする
-if ($location === '') {
-  http_response_code(400);
-  echo json_encode(['success' => false, 'error' => '場所は必須です（重複チェックのため）']);
-  exit;
-}
-
-// start < end チェック（文字列でも比較できないので PHPで確認）
-try {
-  $dtStart = new DateTime($start);
-  $dtEnd   = new DateTime($end);
-  if ($dtStart >= $dtEnd) {
-    http_response_code(400);
-    echo json_encode(['success' => false, 'error' => '終了日時は開始日時より後にしてください']);
+  // 部屋が自組織のものかチェック
+  $stmt = $pdo->prepare('SELECT id FROM rooms WHERE id = :room_id AND org_id = :org_id');
+  $stmt->execute([':room_id' => $room_id, ':org_id' => $org_id]);
+  if (!$stmt->fetch()) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'その部屋は利用できません']);
     exit;
   }
-} catch (Exception $e) {
-  http_response_code(400);
-  echo json_encode(['success' => false, 'error' => '日時形式が不正です']);
-  exit;
-}
 
-try {
   $pdo->beginTransaction();
 
-  // ★ 重複チェック：同じ場所で
-  //   既存.start < 新.end AND 既存.end > 新.start なら「重複」
-  //   競合を防ぐため FOR UPDATE でロック
+  // ★ 重複チェック：同じ部屋 × 時間が重なる
   $check = $pdo->prepare(
-    'SELECT id, title, start, end
+    'SELECT id
      FROM reservations
-     WHERE location = :location
+     WHERE org_id = :org_id
+       AND room_id = :room_id
        AND start < :new_end
        AND end > :new_start
      LIMIT 1
      FOR UPDATE'
   );
   $check->execute([
-    ':location' => $location,
+    ':org_id' => $org_id,
+    ':room_id' => $room_id,
     ':new_start' => $start,
     ':new_end' => $end,
   ]);
 
-  $conflict = $check->fetch(PDO::FETCH_ASSOC);
-  if ($conflict) {
+  if ($check->fetch()) {
     $pdo->rollBack();
     http_response_code(409);
-    echo json_encode([
-      'success' => false,
-      'error' => 'その場所は指定時間に既に予約があります',
-      'conflict' => $conflict,
-    ]);
+    echo json_encode(['success' => false, 'error' => 'その部屋は指定時間に既に予約があります']);
     exit;
   }
 
-  // 登録
-  $stmt = $pdo->prepare(
-    'INSERT INTO reservations (user_id, location, who_name, title, start, end, description)
-     VALUES (:user_id, :location, :who_name, :title, :start, :end, :description)'
+  // ★ INSERT（保存）
+  $ins = $pdo->prepare(
+    'INSERT INTO reservations (org_id, user_id, room_id, title, start, end, who_name, description)
+     VALUES (:org_id, :user_id, :room_id, :title, :start, :end, :who_name, :description)'
   );
-  $stmt->execute([
-    ':user_id' => $_SESSION['user_id'],
-    ':location' => $location,
-    ':who_name' => $who_name,
+  $ins->execute([
+    ':org_id' => $org_id,
+    ':user_id' => $user_id,
+    ':room_id' => $room_id,
     ':title' => $title,
     ':start' => $start,
     ':end' => $end,
+    ':who_name' => ($who_name === '' ? null : $who_name),
     ':description' => ($description === '' ? null : $description),
   ]);
 
   $pdo->commit();
+
   echo json_encode(['success' => true]);
+
 } catch (PDOException $e) {
-  if ($pdo->inTransaction()) $pdo->rollBack();
+  if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
   http_response_code(500);
-  echo json_encode(['success' => false, 'error' => '登録に失敗しました']);
+  echo json_encode(['success' => false, 'error' => 'DBエラー']);
 }
